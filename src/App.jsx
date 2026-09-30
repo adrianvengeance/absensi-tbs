@@ -1,166 +1,215 @@
 import React, { useState, useEffect } from "react";
-import FingerprintJS from "@fingerprintjs/fingerprintjs";
 
 const API_URL = import.meta.env.VITE_API_URL;
+const MAX_RADIUS_METER = 50;
+
+const getHardwareFingerprint = () => {
+  const canvas = document.createElement("canvas");
+  const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+  let debugInfo = "";
+
+  if (gl) {
+    const ext = gl.getExtension("WEBGL_debug_renderer_info");
+    if (ext) {
+      debugInfo = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL);
+    }
+  }
+
+  const rawId = [screen.width, screen.height, screen.colorDepth, navigator.hardwareConcurrency || 1, navigator.deviceMemory || 0, debugInfo, navigator.platform].join("|");
+
+  let hash = 0;
+  for (let i = 0; i < rawId.length; i++) {
+    const char = rawId.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash |= 0;
+  }
+  return "HW-" + Math.abs(hash).toString(16);
+};
+
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+  if (!lat1 || !lon1 || !lat2 || !lon2) return null;
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c);
+};
 
 function App() {
-  // States
-  const [pin, setPin] = useState("");
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [employees, setEmployees] = useState([]);
-  const [selectedEmployee, setSelectedEmployee] = useState("");
-  const [fingerprint, setFingerprint] = useState("");
-  const [location, setLocation] = useState(null);
+  const [configData, setConfigData] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
 
-  // UI & Loading States
-  const [loading, setLoading] = useState(false);
+  const [inputPin, setInputPin] = useState("");
+  const [statusAbsen, setStatusAbsen] = useState("Hadir");
+  const [userLocation, setUserLocation] = useState(null);
+  const [distanceMeter, setDistanceMeter] = useState(null);
+  const [hardwareFp, setHardwareFp] = useState("");
+
+  const [loadingConfig, setLoadingConfig] = useState(true);
+  const [loadingLogin, setLoadingLogin] = useState(false);
+  const [loadingGps, setLoadingGps] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [isBlocked, setIsBlocked] = useState(false);
   const [message, setMessage] = useState({ type: "", text: "" });
-  const [showModal, setShowModal] = useState(false);
+  const [isSubmitted, setIsSubmitted] = useState(false);
 
-  // 1. Inisialisasi FingerprintJS saat aplikasi dimuat
   useEffect(() => {
-    const initFingerprint = async () => {
-      const fp = await FingerprintJS.load();
-      const result = await fp.get();
-      setFingerprint(result.visitorId);
-    };
-    initFingerprint();
+    setHardwareFp(getHardwareFingerprint());
+    fetchGPSLocation();
+    fetchConfig();
   }, []);
 
-  // 2. Handler Verifikasi PIN
-  const handlePinSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setMessage({ type: "", text: "" });
+  useEffect(() => {
+    if (userLocation && configData?.kantorLocation) {
+      const dist = calculateDistance(userLocation.lat, userLocation.lng, configData.kantorLocation.lat, configData.kantorLocation.lng);
+      setDistanceMeter(dist);
+    }
+  }, [userLocation, configData]);
 
+  const fetchConfig = async () => {
     try {
-      const response = await fetch(`${API_URL}?action=getInitialData&pin=${pin}`);
-      const result = await response.json();
-
+      const res = await fetch(`${API_URL}?action=getInitialConfig`);
+      const result = await res.json();
       if (result.status === "success") {
-        setIsAuthenticated(true);
-        setEmployees(result.data.employees);
+        setConfigData(result.data);
       } else {
         setMessage({ type: "error", text: result.message });
       }
     } catch (err) {
-      setMessage({ type: "error", text: "Gagal terhubung ke server. Periksa koneksi internet." });
+      setMessage({ type: "error", text: "Gagal mengambil data konfigurasi dari server." });
     } finally {
-      setLoading(false);
+      setLoadingConfig(false);
     }
   };
 
-  // 3. Handler Mengambil Lokasi GPS
-  const requestLocationAndConfirm = () => {
-    if (!selectedEmployee) {
-      setMessage({ type: "error", text: "Pilih nama karyawan terlebih dahulu!" });
-      return;
-    }
-
+  const fetchGPSLocation = () => {
     if (!navigator.geolocation) {
       setMessage({ type: "error", text: "Browser/HP Anda tidak mendukung Geolocation." });
       return;
     }
 
-    setLoading(true);
-    setMessage({ type: "", text: "" });
-
+    setLoadingGps(true);
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setLocation({
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
+      (pos) => {
+        setUserLocation({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
         });
-        setLoading(false);
-        setShowModal(true);
+        setLoadingGps(false);
       },
-      (error) => {
-        setLoading(false);
+      (err) => {
+        setLoadingGps(false);
         setMessage({
           type: "error",
-          text: "Gagal mengambil lokasi GPS. Izinkan/Aktifkan Akses Lokasi (GPS) di HP Anda.",
+          text: "Gagal mengambil lokasi. Pastikan GPS/Akses Lokasi aktif!",
         });
       },
       { enableHighAccuracy: true },
     );
   };
 
-  // 4. Handler Kirim Absensi
+  const handleLogin = (e) => {
+    e.preventDefault();
+    setLoadingLogin(true);
+    setMessage({ type: "", text: "" });
+
+    setTimeout(() => {
+      if (!configData || !configData.employees) {
+        setMessage({ type: "error", text: "Data konfigurasi belum siap. Coba lagi." });
+        setLoadingLogin(false);
+        return;
+      }
+
+      const matched = configData.employees.find((emp) => String(emp.pin) === String(inputPin).trim());
+
+      if (matched) {
+        setCurrentUser(matched);
+        setMessage({ type: "", text: "" });
+      } else {
+        setMessage({ type: "error", text: "PIN Salah! Periksa kembali PIN Anda." });
+        setLoadingLogin(false);
+      }
+    }, 400);
+  };
+
   const handleSubmitAttendance = async () => {
-    setShowModal(false);
-    setLoading(true);
+    if (!currentUser || !userLocation || distanceMeter === null || isBlocked) return;
+
+    if (distanceMeter > MAX_RADIUS_METER) {
+      setMessage({
+        type: "error",
+        text: `Jarak Anda (${distanceMeter}m) melebihi batas lokasi kantor (${MAX_RADIUS_METER}m).`,
+      });
+      return;
+    }
+
+    setSubmitting(true);
+    setMessage({ type: "", text: "" });
 
     const payload = {
-      pin: pin,
-      nama: selectedEmployee,
-      fingerprint: fingerprint,
-      lat: location.lat,
-      lng: location.lng,
+      nama: currentUser.nama,
+      statusAbsen: statusAbsen,
+      hardwareFingerprint: hardwareFp,
+      lat: userLocation.lat,
+      lng: userLocation.lng,
+      distance: distanceMeter,
     };
 
     try {
-      const response = await fetch(API_URL, {
+      const res = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "text/plain" },
         body: JSON.stringify(payload),
       });
-
-      const result = await response.json();
+      const result = await res.json();
 
       if (result.status === "success") {
-        setMessage({ type: "success", text: result.message });
-        setSelectedEmployee("");
+        setIsSubmitted(true);
       } else {
         setMessage({ type: "error", text: result.message });
+
+        const errText = result.message.toLowerCase();
+        if (errText.includes("sudah") || errText.includes("terikat") || errText.includes("tidak ditemukan")) {
+          setIsBlocked(true);
+        }
       }
     } catch (err) {
-      setMessage({ type: "error", text: "Terjadi kesalahan saat mengunduh/mengirim data." });
+      setMessage({ type: "error", text: "Gagal mengirim data absensi. Periksa koneksi." });
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
-  // Fungsi pembentuk Hardware ID (Tetap sama walau ganti browser di HP yang sama)
-  const getHardwareFingerprint = () => {
-    const canvas = document.createElement("canvas");
-    const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
-    let debugInfo = "";
+  if (loadingConfig) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.card}>
+          <p style={{ textAlign: "center" }}>Memuat konfigurasi aplikasi...</p>
+        </div>
+      </div>
+    );
+  }
 
-    if (gl) {
-      const ext = gl.getExtension("WEBGL_debug_renderer_info");
-      if (ext) {
-        debugInfo = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL); // Mengambil Chipset GPU HP (misal: Adreno 610 / Mali-G57)
-      }
-    }
-
-    // Gabungkan atribut fisik hardware HP
-    const rawId = [
-      screen.width,
-      screen.height,
-      screen.colorDepth,
-      navigator.hardwareConcurrency || 1, // Jumlah Core CPU
-      navigator.deviceMemory || 0, // Ukuran RAM
-      debugInfo, // Chipset Graphics GPU
-      navigator.platform, // OS Platform (Linux armv8l / iPhone, dll)
-    ].join("|");
-
-    // Simple Hash Function ke String Hexadecimal
-    let hash = 0;
-    for (let i = 0; i < rawId.length; i++) {
-      const char = rawId.charCodeAt(i);
-      hash = (hash << 5) - hash + char;
-      hash |= 0;
-    }
-    return "HW-" + Math.abs(hash).toString(16);
-  };
+  if (isSubmitted) {
+    return (
+      <div style={styles.container}>
+        <div style={{ ...styles.card, textAlign: "center" }}>
+          <div style={{ fontSize: "50px", marginBottom: "10px" }}>✅</div>
+          <h2 style={{ color: "#28a745", margin: "0 0 10px 0" }}>Absensi Berhasil!</h2>
+          <p style={{ fontSize: "15px", color: "#333", fontWeight: "bold" }}>{currentUser?.nama}</p>
+          <p style={{ fontSize: "14px", color: "#6c757d", marginBottom: "20px" }}>Anda telah berhasil mencatatkan kehadiran ({statusAbsen}) untuk hari ini. Terima kasih!</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={styles.container}>
       <div style={styles.card}>
         <h2 style={styles.title}>PT. TRIKORA BANGKEP SEJAHTERA</h2>
-        <p style={styles.subtitle}>Sistem Absensi Digital Karyawan</p>
+        <p style={styles.subtitle}>Sistem Absensi Digital</p>
 
-        {/* BACAAN ALERT / MESSAGE */}
         {message.text && (
           <div
             style={{
@@ -173,63 +222,96 @@ function App() {
           </div>
         )}
 
-        {/* TAMPILAN 1: LAYAR LOCK PIN */}
-        {!isAuthenticated ? (
-          <form onSubmit={handlePinSubmit} style={styles.form}>
+        {!currentUser ? (
+          <form onSubmit={handleLogin} style={styles.form}>
             <div style={styles.inputGroup}>
-              <label style={styles.label}>Masukkan PIN Aplikasi:</label>
-              <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} placeholder="****" maxLength={6} style={styles.input} required />
+              <label style={styles.label}>Masukkan PIN Anda:</label>
+              <input type="password" value={inputPin} onChange={(e) => setInputPin(e.target.value)} placeholder="****" maxLength={6} style={styles.input} disabled={loadingLogin} required />
             </div>
-            <button type="submit" disabled={loading} style={styles.button}>
-              {loading ? "Verifikasi..." : "Masuk App"}
+            <button
+              type="submit"
+              disabled={loadingLogin}
+              style={{
+                ...styles.button,
+                backgroundColor: loadingLogin ? "#cccccc" : "#1F4E78",
+                cursor: loadingLogin ? "not-allowed" : "pointer",
+              }}
+            >
+              {loadingLogin ? "Memproses..." : "Masuk Aplikasi"}
             </button>
           </form>
         ) : (
-          /* TAMPILAN 2: DASHBOARD ABSENSI */
           <div style={styles.form}>
+            <div style={styles.profileBox}>
+              <h3 style={{ margin: 0, color: "#1F4E78" }}>{currentUser.nama}</h3>
+              <p style={{ margin: "2px 0 0 0", color: "#6c757d", fontSize: "14px" }}>{currentUser.jabatan}</p>
+            </div>
+
+            <div style={styles.gpsBox}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: "13px", fontWeight: "bold" }}>Info Lokasi GPS:</span>
+                <button
+                  type="button"
+                  onClick={fetchGPSLocation}
+                  disabled={loadingGps || isBlocked}
+                  style={{
+                    ...styles.refreshBtn,
+                    backgroundColor: loadingGps || isBlocked ? "#ccc" : "#6c757d",
+                    cursor: loadingGps || isBlocked ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {loadingGps ? "Refreshing..." : "🔄 Refresh Lokasi"}
+                </button>
+              </div>
+
+              <div style={{ marginTop: "8px" }}>
+                {distanceMeter !== null ? (
+                  <p
+                    style={{
+                      margin: 0,
+                      fontWeight: "bold",
+                      fontSize: "15px",
+                      color: distanceMeter <= MAX_RADIUS_METER ? "#28a745" : "#dc3545",
+                    }}
+                  >
+                    Jarak dari Kantor: {distanceMeter} meter
+                    {distanceMeter <= MAX_RADIUS_METER ? " (Di dalam Radius)" : " (Terlalu Jauh)"}
+                  </p>
+                ) : (
+                  <p style={{ margin: 0, fontSize: "13px", color: "#6c757d" }}>{loadingGps ? "Mencari lokasi GPS..." : "Lokasi belum terdeteksi."}</p>
+                )}
+              </div>
+            </div>
+
             <div style={styles.inputGroup}>
-              <label style={styles.label}>Pilih Nama Karyawan:</label>
-              <select value={selectedEmployee} onChange={(e) => setSelectedEmployee(e.target.value)} style={styles.select}>
-                <option value="">-- Pilih Nama Anda --</option>
-                {employees.map((emp, idx) => (
-                  <option key={idx} value={emp.nama}>
-                    {emp.nama} ({emp.jabatan})
-                  </option>
-                ))}
+              <label style={styles.label}>Status Kehadiran:</label>
+              <select value={statusAbsen} onChange={(e) => setStatusAbsen(e.target.value)} disabled={submitting || isBlocked} style={styles.select}>
+                <option value="Hadir">Hadir</option>
+                <option value="Sakit">Sakit</option>
+                <option value="Izin">Izin</option>
+                <option value="Tugas Luar">Tugas Luar</option>
               </select>
             </div>
 
-            <button onClick={requestLocationAndConfirm} disabled={loading} style={{ ...styles.button, backgroundColor: "#1F4E78" }}>
-              {loading ? "Mengambil GPS..." : "Kirim Absensi"}
+            {/* SUBMIT BUTTON (Disabled jika jarak > 50m ATAU submitting ATAU isBlocked) */}
+            <button
+              onClick={handleSubmitAttendance}
+              disabled={submitting || distanceMeter === null || distanceMeter > MAX_RADIUS_METER || isBlocked}
+              style={{
+                ...styles.button,
+                backgroundColor: !isBlocked && distanceMeter !== null && distanceMeter <= MAX_RADIUS_METER && !submitting ? "#1F4E78" : "#cccccc",
+                cursor: !isBlocked && distanceMeter !== null && distanceMeter <= MAX_RADIUS_METER && !submitting ? "pointer" : "not-allowed",
+              }}
+            >
+              {submitting ? "Mengirim Data..." : isBlocked ? "Akses Absensi Ditolak" : "Kirim Absensi"}
             </button>
           </div>
         )}
       </div>
-
-      {/* POP-UP MODAL KONFIRMASI INTEGRITAS */}
-      {showModal && (
-        <div style={styles.modalOverlay}>
-          <div style={styles.modalContent}>
-            <h3>Konfirmasi Kehadiran</h3>
-            <p>
-              Saya menyatakan dengan sungguh-sungguh bahwa saya adalah <strong>{selectedEmployee}</strong> dan hadir secara fisik di lokasi kantor saat ini.
-            </p>
-            <div style={styles.modalActions}>
-              <button onClick={() => setShowModal(false)} style={{ ...styles.modalButton, backgroundColor: "#6c757d" }}>
-                Batal
-              </button>
-              <button onClick={handleSubmitAttendance} style={{ ...styles.modalButton, backgroundColor: "#28a745" }}>
-                Ya, Saya Menandatangani
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
-// Inline Styling
 const styles = {
   container: {
     minHeight: "100vh",
@@ -294,10 +376,9 @@ const styles = {
     fontSize: "16px",
     fontWeight: "bold",
     color: "#fff",
-    backgroundColor: "#007bff",
     border: "none",
     borderRadius: "6px",
-    cursor: "pointer",
+    transition: "background-color 0.2s",
   },
   alert: {
     padding: "12px",
@@ -306,40 +387,24 @@ const styles = {
     marginBottom: "15px",
     textAlign: "center",
   },
-  modalOverlay: {
-    position: "fixed",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: "20px",
-  },
-  modalContent: {
-    backgroundColor: "#fff",
-    padding: "20px",
-    borderRadius: "10px",
-    maxWidth: "350px",
-    width: "100%",
+  profileBox: {
+    padding: "12px",
+    backgroundColor: "#eef2f7",
+    borderRadius: "8px",
     textAlign: "center",
   },
-  modalActions: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: "10px",
-    marginTop: "20px",
+  gpsBox: {
+    padding: "12px",
+    border: "1px solid #e0e0e0",
+    borderRadius: "8px",
+    backgroundColor: "#fafafa",
   },
-  modalButton: {
-    flex: 1,
-    padding: "10px",
-    border: "none",
-    borderRadius: "6px",
+  refreshBtn: {
+    padding: "4px 8px",
+    fontSize: "12px",
     color: "#fff",
-    fontWeight: "bold",
-    cursor: "pointer",
+    border: "none",
+    borderRadius: "4px",
   },
 };
 
