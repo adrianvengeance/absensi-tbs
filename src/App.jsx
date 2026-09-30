@@ -1,39 +1,84 @@
 import React, { useState, useEffect } from "react";
+import { getHardwareFingerprint, calculateDistance } from "./utils/helper";
+import "./app.css";
 
 const API_URL = import.meta.env.VITE_API_URL;
 const MAX_RADIUS_METER = 50;
 
-const getHardwareFingerprint = () => {
-  const canvas = document.createElement("canvas");
-  const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
-  let debugInfo = "";
-
-  if (gl) {
-    const ext = gl.getExtension("WEBGL_debug_renderer_info");
-    if (ext) {
-      debugInfo = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL);
-    }
-  }
-
-  const rawId = [screen.width, screen.height, screen.colorDepth, navigator.hardwareConcurrency || 1, navigator.deviceMemory || 0, debugInfo, navigator.platform].join("|");
-
-  let hash = 0;
-  for (let i = 0; i < rawId.length; i++) {
-    const char = rawId.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash |= 0;
-  }
-  return "HW-" + Math.abs(hash).toString(16);
+const AlertMessage = ({ message }) => {
+  if (!message.text) return null;
+  const alertClass = message.type === "error" ? "alert-error" : "alert-success";
+  return <div className={`alert-box ${alertClass}`}>{message.text}</div>;
 };
 
-const calculateDistance = (lat1, lon1, lat2, lon2) => {
-  if (!lat1 || !lon1 || !lat2 || !lon2) return null;
-  const R = 6371000;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return Math.round(R * c);
+const SuccessScreen = ({ currentUser, statusAbsen }) => (
+  <div className="app-container">
+    <div className="app-card app-card-center">
+      <div className="success-icon">✅</div>
+      <h2 className="success-title">Absensi Berhasil!</h2>
+      <p className="success-user">{currentUser?.nama}</p>
+      <p className="success-desc">Anda telah berhasil mencatatkan kehadiran ({statusAbsen}) untuk hari ini. Terima kasih!</p>
+    </div>
+  </div>
+);
+
+const LoginForm = ({ inputPin, setInputPin, handleLogin, loadingLogin }) => (
+  <form onSubmit={handleLogin} className="app-form">
+    <div className="input-group">
+      <label className="input-label">Masukkan PIN Anda:</label>
+      <input type="password" value={inputPin} onChange={(e) => setInputPin(e.target.value)} placeholder="****" maxLength={6} className="input-control" disabled={loadingLogin} required />
+    </div>
+    <button type="submit" disabled={loadingLogin} className="btn-primary">
+      {loadingLogin ? "Memproses..." : "Masuk Aplikasi"}
+    </button>
+  </form>
+);
+
+const AttendanceForm = ({ currentUser, distanceMeter, loadingGps, fetchGPSLocation, statusAbsen, setStatusAbsen, handleSubmitAttendance, submitting, isBlocked }) => {
+  const isSubmitDisabled = submitting || distanceMeter === null || distanceMeter > MAX_RADIUS_METER || isBlocked;
+
+  return (
+    <div className="app-form">
+      <div className="profile-box">
+        <h3 className="profile-name">{currentUser.nama}</h3>
+        <p className="profile-role">{currentUser.jabatan}</p>
+      </div>
+
+      <div className="gps-box">
+        <div className="gps-header">
+          <span className="gps-title">Info Lokasi GPS:</span>
+          <button type="button" onClick={fetchGPSLocation} disabled={loadingGps || isBlocked} className="btn-refresh">
+            {loadingGps ? "Memperbarui..." : "🔄 Perbarui Lokasi"}
+          </button>
+        </div>
+
+        <div className="gps-status-container">
+          {distanceMeter !== null ? (
+            <p className={`gps-distance-text ${distanceMeter <= MAX_RADIUS_METER ? "gps-distance-in" : "gps-distance-out"}`}>
+              Jarak dari Kantor: {distanceMeter} meter
+              {distanceMeter <= MAX_RADIUS_METER ? " (Di dalam Radius)" : " (Terlalu Jauh)"}
+            </p>
+          ) : (
+            <p className="gps-loading-text">{loadingGps ? "Mencari lokasi GPS..." : "Lokasi belum terdeteksi."}</p>
+          )}
+        </div>
+      </div>
+
+      <div className="input-group">
+        <label className="input-label">Status Kehadiran:</label>
+        <select value={statusAbsen} onChange={(e) => setStatusAbsen(e.target.value)} disabled={submitting || isBlocked} className="select-control">
+          <option value="Hadir">Hadir</option>
+          <option value="Sakit">Sakit</option>
+          <option value="Izin">Izin</option>
+          <option value="Tugas Luar">Tugas Luar</option>
+        </select>
+      </div>
+
+      <button onClick={handleSubmitAttendance} disabled={isSubmitDisabled} className="btn-primary">
+        {submitting ? "Mengirim Data..." : isBlocked ? "Akses Absensi Ditolak" : "Kirim Absensi"}
+      </button>
+    </div>
+  );
 };
 
 function App() {
@@ -183,229 +228,34 @@ function App() {
 
   if (loadingConfig) {
     return (
-      <div style={styles.container}>
-        <div style={styles.card}>
-          <p style={{ textAlign: "center" }}>Memuat konfigurasi aplikasi...</p>
+      <div className="app-container">
+        <div className="app-card">
+          <p className="app-card-center">Memuat konfigurasi aplikasi...</p>
         </div>
       </div>
     );
   }
 
   if (isSubmitted) {
-    return (
-      <div style={styles.container}>
-        <div style={{ ...styles.card, textAlign: "center" }}>
-          <div style={{ fontSize: "50px", marginBottom: "10px" }}>✅</div>
-          <h2 style={{ color: "#28a745", margin: "0 0 10px 0" }}>Absensi Berhasil!</h2>
-          <p style={{ fontSize: "15px", color: "#333", fontWeight: "bold" }}>{currentUser?.nama}</p>
-          <p style={{ fontSize: "14px", color: "#6c757d", marginBottom: "20px" }}>Anda telah berhasil mencatatkan kehadiran ({statusAbsen}) untuk hari ini. Terima kasih!</p>
-        </div>
-      </div>
-    );
+    return <SuccessScreen currentUser={currentUser} statusAbsen={statusAbsen} />;
   }
 
   return (
-    <div style={styles.container}>
-      <div style={styles.card}>
-        <h2 style={styles.title}>PT. TRIKORA BANGKEP SEJAHTERA</h2>
-        <p style={styles.subtitle}>Sistem Absensi Digital</p>
+    <div className="app-container">
+      <div className="app-card">
+        <h2 className="app-title">PT. TRIKORA BANGKEP SEJAHTERA</h2>
+        <p className="app-subtitle">Sistem Absensi Digital</p>
 
-        {message.text && (
-          <div
-            style={{
-              ...styles.alert,
-              backgroundColor: message.type === "error" ? "#f8d7da" : "#d4edda",
-              color: message.type === "error" ? "#721c24" : "#155724",
-            }}
-          >
-            {message.text}
-          </div>
-        )}
+        <AlertMessage message={message} />
 
         {!currentUser ? (
-          <form onSubmit={handleLogin} style={styles.form}>
-            <div style={styles.inputGroup}>
-              <label style={styles.label}>Masukkan PIN Anda:</label>
-              <input type="password" value={inputPin} onChange={(e) => setInputPin(e.target.value)} placeholder="****" maxLength={6} style={styles.input} disabled={loadingLogin} required />
-            </div>
-            <button
-              type="submit"
-              disabled={loadingLogin}
-              style={{
-                ...styles.button,
-                backgroundColor: loadingLogin ? "#cccccc" : "#1F4E78",
-                cursor: loadingLogin ? "not-allowed" : "pointer",
-              }}
-            >
-              {loadingLogin ? "Memproses..." : "Masuk Aplikasi"}
-            </button>
-          </form>
+          <LoginForm inputPin={inputPin} setInputPin={setInputPin} handleLogin={handleLogin} loadingLogin={loadingLogin} />
         ) : (
-          <div style={styles.form}>
-            <div style={styles.profileBox}>
-              <h3 style={{ margin: 0, color: "#1F4E78" }}>{currentUser.nama}</h3>
-              <p style={{ margin: "2px 0 0 0", color: "#6c757d", fontSize: "14px" }}>{currentUser.jabatan}</p>
-            </div>
-
-            <div style={styles.gpsBox}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: "13px", fontWeight: "bold" }}>Info Lokasi GPS:</span>
-                <button
-                  type="button"
-                  onClick={fetchGPSLocation}
-                  disabled={loadingGps || isBlocked}
-                  style={{
-                    ...styles.refreshBtn,
-                    backgroundColor: loadingGps || isBlocked ? "#ccc" : "#6c757d",
-                    cursor: loadingGps || isBlocked ? "not-allowed" : "pointer",
-                  }}
-                >
-                  {loadingGps ? "Refreshing..." : "🔄 Refresh Lokasi"}
-                </button>
-              </div>
-
-              <div style={{ marginTop: "8px" }}>
-                {distanceMeter !== null ? (
-                  <p
-                    style={{
-                      margin: 0,
-                      fontWeight: "bold",
-                      fontSize: "15px",
-                      color: distanceMeter <= MAX_RADIUS_METER ? "#28a745" : "#dc3545",
-                    }}
-                  >
-                    Jarak dari Kantor: {distanceMeter} meter
-                    {distanceMeter <= MAX_RADIUS_METER ? " (Di dalam Radius)" : " (Terlalu Jauh)"}
-                  </p>
-                ) : (
-                  <p style={{ margin: 0, fontSize: "13px", color: "#6c757d" }}>{loadingGps ? "Mencari lokasi GPS..." : "Lokasi belum terdeteksi."}</p>
-                )}
-              </div>
-            </div>
-
-            <div style={styles.inputGroup}>
-              <label style={styles.label}>Status Kehadiran:</label>
-              <select value={statusAbsen} onChange={(e) => setStatusAbsen(e.target.value)} disabled={submitting || isBlocked} style={styles.select}>
-                <option value="Hadir">Hadir</option>
-                <option value="Sakit">Sakit</option>
-                <option value="Izin">Izin</option>
-                <option value="Tugas Luar">Tugas Luar</option>
-              </select>
-            </div>
-
-            {/* SUBMIT BUTTON (Disabled jika jarak > 50m ATAU submitting ATAU isBlocked) */}
-            <button
-              onClick={handleSubmitAttendance}
-              disabled={submitting || distanceMeter === null || distanceMeter > MAX_RADIUS_METER || isBlocked}
-              style={{
-                ...styles.button,
-                backgroundColor: !isBlocked && distanceMeter !== null && distanceMeter <= MAX_RADIUS_METER && !submitting ? "#1F4E78" : "#cccccc",
-                cursor: !isBlocked && distanceMeter !== null && distanceMeter <= MAX_RADIUS_METER && !submitting ? "pointer" : "not-allowed",
-              }}
-            >
-              {submitting ? "Mengirim Data..." : isBlocked ? "Akses Absensi Ditolak" : "Kirim Absensi"}
-            </button>
-          </div>
+          <AttendanceForm currentUser={currentUser} distanceMeter={distanceMeter} loadingGps={loadingGps} fetchGPSLocation={fetchGPSLocation} statusAbsen={statusAbsen} setStatusAbsen={setStatusAbsen} handleSubmitAttendance={handleSubmitAttendance} submitting={submitting} isBlocked={isBlocked} />
         )}
       </div>
     </div>
   );
 }
-
-const styles = {
-  container: {
-    minHeight: "100vh",
-    backgroundColor: "#f4f6f9",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: "20px",
-    fontFamily: "Arial, sans-serif",
-  },
-  card: {
-    backgroundColor: "#ffffff",
-    width: "100%",
-    maxWidth: "400px",
-    padding: "25px",
-    borderRadius: "12px",
-    boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-  },
-  title: {
-    fontSize: "18px",
-    fontWeight: "bold",
-    textAlign: "center",
-    color: "#1F4E78",
-    margin: "0 0 5px 0",
-  },
-  subtitle: {
-    fontSize: "14px",
-    textAlign: "center",
-    color: "#6c757d",
-    margin: "0 0 20px 0",
-  },
-  form: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "15px",
-  },
-  inputGroup: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "5px",
-  },
-  label: {
-    fontSize: "14px",
-    fontWeight: "bold",
-    color: "#333",
-  },
-  input: {
-    padding: "12px",
-    fontSize: "16px",
-    borderRadius: "6px",
-    border: "1px solid #ccc",
-    textAlign: "center",
-  },
-  select: {
-    padding: "12px",
-    fontSize: "15px",
-    borderRadius: "6px",
-    border: "1px solid #ccc",
-  },
-  button: {
-    padding: "12px",
-    fontSize: "16px",
-    fontWeight: "bold",
-    color: "#fff",
-    border: "none",
-    borderRadius: "6px",
-    transition: "background-color 0.2s",
-  },
-  alert: {
-    padding: "12px",
-    borderRadius: "6px",
-    fontSize: "14px",
-    marginBottom: "15px",
-    textAlign: "center",
-  },
-  profileBox: {
-    padding: "12px",
-    backgroundColor: "#eef2f7",
-    borderRadius: "8px",
-    textAlign: "center",
-  },
-  gpsBox: {
-    padding: "12px",
-    border: "1px solid #e0e0e0",
-    borderRadius: "8px",
-    backgroundColor: "#fafafa",
-  },
-  refreshBtn: {
-    padding: "4px 8px",
-    fontSize: "12px",
-    color: "#fff",
-    border: "none",
-    borderRadius: "4px",
-  },
-};
 
 export default App;
