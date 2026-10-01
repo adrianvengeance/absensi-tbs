@@ -34,8 +34,12 @@ const LoginForm = ({ inputPin, setInputPin, handleLogin, loadingLogin }) => (
   </form>
 );
 
-const AttendanceForm = ({ currentUser, distanceMeter, loadingGps, fetchGPSLocation, statusAbsen, setStatusAbsen, handleSubmitAttendance, submitting, isBlocked }) => {
-  const isSubmitDisabled = submitting || distanceMeter === null || distanceMeter > MAX_RADIUS_METER || isBlocked;
+const AttendanceForm = ({ currentUser, distanceMeter, loadingGps, fetchGPSLocation, statusAbsen, setStatusAbsen, keterangan, setKeterangan, handleSubmitAttendance, submitting, isBlocked }) => {
+  const isNeedLocationValidation = statusAbsen === "Hadir";
+  const isLocationInvalid = isNeedLocationValidation && (distanceMeter === null || distanceMeter > MAX_RADIUS_METER);
+  const isKeteranganMissing = statusAbsen !== "Hadir" && !keterangan.trim();
+
+  const isSubmitDisabled = submitting || isLocationInvalid || isKeteranganMissing || isBlocked;
 
   return (
     <div className="app-form">
@@ -43,6 +47,25 @@ const AttendanceForm = ({ currentUser, distanceMeter, loadingGps, fetchGPSLocati
         <h3 className="profile-name">{currentUser.nama}</h3>
         <p className="profile-role">{currentUser.jabatan}</p>
       </div>
+
+      <div className="input-group">
+        <label className="input-label">Status Kehadiran:</label>
+        <select value={statusAbsen} onChange={(e) => setStatusAbsen(e.target.value)} disabled={submitting || isBlocked} className="select-control">
+          <option value="Hadir">Hadir</option>
+          <option value="Sakit">Sakit</option>
+          <option value="Izin">Izin</option>
+          <option value="Tugas Luar">Tugas Luar</option>
+        </select>
+      </div>
+
+      {statusAbsen !== "Hadir" && (
+        <div className="input-group">
+          <label className="input-label">
+            Keterangan ({statusAbsen}) <span style={{ color: "red" }}>*</span>:
+          </label>
+          <input type="text" value={keterangan} onChange={(e) => setKeterangan(e.target.value)} placeholder={`Alasan/Keterangan ${statusAbsen}...`} className="input-control" disabled={submitting || isBlocked} required />
+        </div>
+      )}
 
       <div className="gps-box">
         <div className="gps-header">
@@ -56,22 +79,12 @@ const AttendanceForm = ({ currentUser, distanceMeter, loadingGps, fetchGPSLocati
           {distanceMeter !== null ? (
             <p className={`gps-distance-text ${distanceMeter <= MAX_RADIUS_METER ? "gps-distance-in" : "gps-distance-out"}`}>
               Jarak dari Kantor: {distanceMeter} meter
-              {distanceMeter <= MAX_RADIUS_METER ? " (Di dalam Radius)" : " (Terlalu Jauh)"}
+              {statusAbsen === "Hadir" ? (distanceMeter <= MAX_RADIUS_METER ? " (Di dalam Radius)" : " (Terlalu Jauh)") : " (Abaikan Jarak)"}
             </p>
           ) : (
             <p className="gps-loading-text">{loadingGps ? "Mencari lokasi GPS..." : "Lokasi belum terdeteksi."}</p>
           )}
         </div>
-      </div>
-
-      <div className="input-group">
-        <label className="input-label">Status Kehadiran:</label>
-        <select value={statusAbsen} onChange={(e) => setStatusAbsen(e.target.value)} disabled={submitting || isBlocked} className="select-control">
-          <option value="Hadir">Hadir</option>
-          <option value="Sakit">Sakit</option>
-          <option value="Izin">Izin</option>
-          <option value="Tugas Luar">Tugas Luar</option>
-        </select>
       </div>
 
       <button onClick={handleSubmitAttendance} disabled={isSubmitDisabled} className="btn-primary">
@@ -87,6 +100,7 @@ function App() {
 
   const [inputPin, setInputPin] = useState("");
   const [statusAbsen, setStatusAbsen] = useState("Hadir");
+  const [keterangan, setKeterangan] = useState("");
   const [userLocation, setUserLocation] = useState(null);
   const [distanceMeter, setDistanceMeter] = useState(null);
   const [hardwareFp, setHardwareFp] = useState("");
@@ -179,13 +193,18 @@ function App() {
   };
 
   const handleSubmitAttendance = async () => {
-    if (!currentUser || !userLocation || distanceMeter === null || isBlocked) return;
+    if (!currentUser || isBlocked) return;
 
-    if (distanceMeter > MAX_RADIUS_METER) {
+    if (statusAbsen === "Hadir" && (distanceMeter === null || distanceMeter > MAX_RADIUS_METER)) {
       setMessage({
         type: "error",
         text: `Jarak Anda (${distanceMeter}m) melebihi batas lokasi kantor (${MAX_RADIUS_METER}m).`,
       });
+      return;
+    }
+
+    if (statusAbsen !== "Hadir" && !keterangan.trim()) {
+      setMessage({ type: "error", text: "Tolong isi Keterangan/Alasan terlebih dahulu!" });
       return;
     }
 
@@ -195,10 +214,11 @@ function App() {
     const payload = {
       nama: currentUser.nama,
       statusAbsen: statusAbsen,
+      keterangan: statusAbsen !== "Hadir" ? keterangan.trim() : "",
       hardwareFingerprint: hardwareFp,
-      lat: userLocation.lat,
-      lng: userLocation.lng,
-      distance: distanceMeter,
+      lat: userLocation ? userLocation.lat : 0,
+      lng: userLocation ? userLocation.lng : 0,
+      distance: distanceMeter || 0,
     };
 
     try {
@@ -244,14 +264,26 @@ function App() {
     <div className="app-container">
       <div className="app-card">
         <h2 className="app-title">PT. TRIKORA BANGKEP SEJAHTERA</h2>
-        <p className="app-subtitle">Sistem Absensi Digital</p>
+        <p className="app-subtitle">Absensi Digital</p>
 
         <AlertMessage message={message} />
 
         {!currentUser ? (
           <LoginForm inputPin={inputPin} setInputPin={setInputPin} handleLogin={handleLogin} loadingLogin={loadingLogin} />
         ) : (
-          <AttendanceForm currentUser={currentUser} distanceMeter={distanceMeter} loadingGps={loadingGps} fetchGPSLocation={fetchGPSLocation} statusAbsen={statusAbsen} setStatusAbsen={setStatusAbsen} handleSubmitAttendance={handleSubmitAttendance} submitting={submitting} isBlocked={isBlocked} />
+          <AttendanceForm
+            currentUser={currentUser}
+            distanceMeter={distanceMeter}
+            loadingGps={loadingGps}
+            fetchGPSLocation={fetchGPSLocation}
+            statusAbsen={statusAbsen}
+            setStatusAbsen={setStatusAbsen}
+            keterangan={keterangan}
+            setKeterangan={setKeterangan}
+            handleSubmitAttendance={handleSubmitAttendance}
+            submitting={submitting}
+            isBlocked={isBlocked}
+          />
         )}
       </div>
     </div>
