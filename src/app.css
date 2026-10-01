@@ -36,7 +36,7 @@
   font-size: 14px;
   text-align: center;
   color: #6c757d;
-  margin: 0 0 20px 0;
+  margin: 0 0 10px 0;
 }
 
 /* Form & Input Elements */
@@ -218,7 +218,7 @@
   padding: 4px;
   border-radius: 8px;
   text-align: center;
-  margin-bottom: 20px;
+  margin-bottom: 10px;
 }
 
 .clock-time {
@@ -233,4 +233,54 @@
   font-size: 16px;
   opacity: 0.9;
   text-transform: capitalize;
+}
+
+.header-login {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0px;
+}
+
+.logo-login {
+  width: 90px;
+  height: auto;
+  object-fit: contain;
+  margin-bottom: 12px;
+}
+
+.header-dashboard {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 50px;
+  margin-bottom: 5px;
+}
+
+.logo-dashboard {
+  position: absolute;
+  left: 0;
+  width: 42px;
+  height: 42px;
+  object-fit: contain;
+}
+
+.header-dashboard-text {
+  text-align: center;
+  padding-left: 45px; /* Memberikan ruang agar teks tidak menabrak logo */
+  padding-right: 10px;
+}
+
+.header-dashboard-text .app-title {
+  text-align: center;
+  font-size: 15px;
+  margin: 0;
+}
+
+.header-dashboard-text .app-subtitle {
+  text-align: center;
+  font-size: 13px;
+  margin: 2px 0 0 0;
 }

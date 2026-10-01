@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { getHardwareFingerprint, calculateDistance, isWithinWorkingHoursClient, getFormattedDate, getFormattedTime } from "./utils/helper";
 import "./app.css";
+import logoImg from "../public/logo.webp";
 
 const API_URL = import.meta.env.VITE_API_URL;
 const MAX_RADIUS_METER = 50;
@@ -301,8 +302,21 @@ function App() {
   return (
     <div className="app-container">
       <div className="app-card">
-        <h2 className="app-title">PT. TRIKORA BANGKEP SEJAHTERA</h2>
-        <p className="app-subtitle">Absensi Digital</p>
+        {!currentUser ? (
+          <div className="header-login">
+            <img src={logoImg} alt="Logo PT Trikora" className="logo-login" />
+            <h2 className="app-title">PT. TRIKORA BANGKEP SEJAHTERA</h2>
+            <p className="app-subtitle">Absensi Digital</p>
+          </div>
+        ) : (
+          <div className="header-dashboard">
+            <img src={logoImg} alt="Logo PT Trikora" className="logo-dashboard" />
+            <div className="header-dashboard-text">
+              <h2 className="app-title">PT. TRIKORA BANGKEP SEJAHTERA</h2>
+              <p className="app-subtitle">Absensi Digital</p>
+            </div>
+          </div>
+        )}
 
         <RealtimeClock />
 
