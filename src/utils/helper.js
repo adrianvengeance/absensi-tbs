@@ -30,3 +30,36 @@ export const calculateDistance = (lat1, lon1, lat2, lon2) => {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return Math.round(R * c);
 };
+
+export const isWithinWorkingHoursClient = () => {
+  const now = new Date();
+  const hours = now.getHours();
+  const minutes = now.getMinutes();
+
+  const totalMinutes = hours * 60 + minutes;
+  const startMinutes = 7 * 60;
+  const endMinutes = 17 * 60;
+
+  return totalMinutes >= startMinutes && totalMinutes <= endMinutes;
+};
+
+export const getFormattedDate = () => {
+  const now = new Date();
+  const options = {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  };
+  return now.toLocaleDateString("id-ID", options);
+};
+
+export const getFormattedTime = () => {
+  const now = new Date();
+  return now.toLocaleTimeString("id-ID", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+};

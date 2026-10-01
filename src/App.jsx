@@ -1,9 +1,30 @@
 import React, { useState, useEffect } from "react";
-import { getHardwareFingerprint, calculateDistance } from "./utils/helper";
+import { getHardwareFingerprint, calculateDistance, isWithinWorkingHoursClient, getFormattedDate, getFormattedTime } from "./utils/helper";
 import "./app.css";
 
 const API_URL = import.meta.env.VITE_API_URL;
 const MAX_RADIUS_METER = 50;
+
+const RealtimeClock = () => {
+  const [timeStr, setTimeStr] = useState(getFormattedTime());
+  const [dateStr, setDateStr] = useState(getFormattedDate());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTimeStr(getFormattedTime());
+      setDateStr(getFormattedDate());
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <div className="clock-container">
+      <div className="clock-date">📅 {dateStr}</div>
+      <div className="clock-time">🕰️ {timeStr}</div>
+    </div>
+  );
+};
 
 const AlertMessage = ({ message }) => {
   if (!message.text) return null;
@@ -117,6 +138,14 @@ function App() {
     setHardwareFp(getHardwareFingerprint());
     fetchGPSLocation();
     fetchConfig();
+
+    if (!isWithinWorkingHoursClient()) {
+      setMessage({
+        type: "error",
+        text: "Aplikasi Absensi saat ini TUTUP. Jam operasional: 07:00 - 17:00.",
+      });
+      setIsBlocked(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -195,6 +224,15 @@ function App() {
   const handleSubmitAttendance = async () => {
     if (!currentUser || isBlocked) return;
 
+    if (!isWithinWorkingHoursClient()) {
+      setMessage({
+        type: "error",
+        text: "Absensi ditolak! Aplikasi hanya dapat diakses pada pukul 07:00 - 17:00.",
+      });
+      setIsBlocked(true);
+      return;
+    }
+
     if (statusAbsen === "Hadir" && (distanceMeter === null || distanceMeter > MAX_RADIUS_METER)) {
       setMessage({
         type: "error",
@@ -265,6 +303,8 @@ function App() {
       <div className="app-card">
         <h2 className="app-title">PT. TRIKORA BANGKEP SEJAHTERA</h2>
         <p className="app-subtitle">Absensi Digital</p>
+
+        <RealtimeClock />
 
         <AlertMessage message={message} />
 
